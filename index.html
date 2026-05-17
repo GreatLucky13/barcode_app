@@ -1,0 +1,50 @@
+let scannedData = []; // 스캔된 바코드 저장 배열
+
+// 1. 스캔 성공 시 콜백
+function onScanSuccess(decodedText, decodedResult) {
+    if (!scannedData.includes(decodedText)) {
+        scannedData.push({ 
+            번호: scannedData.length + 1, 
+            바코드: decodedText, 
+            시간: new Date().toLocaleString() 
+        });
+        updateTable();
+        alert("스캔 완료: " + decodedText);
+    }
+}
+
+// 2. 엑셀 변환 및 공유
+async function exportAndShare() {
+    if (scannedData.length === 0) return alert("스캔된 데이터가 없습니다.");
+
+    // 엑셀 파일 생성
+    const worksheet = XLSX.utils.json_to_sheet(scannedData);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Barcodes");
+    
+    // 바이너리 데이터로 변환
+    const excelBuffer = XLSX.write(workbook, { bookType: 'xlsx', type: 'array' });
+    const data = new Blob([excelBuffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    
+    const file = new File([data], `barcode_list_${new Date().getTime()}.xlsx`, { type: data.type });
+
+    // Web Share API를 이용한 공유 (모바일에서 작동)
+    if (navigator.share) {
+        try {
+            await navigator.share({
+                files: [file],
+                title: '바코드 스캔 목록',
+                text: '스캔한 바코드 엑셀 파일입니다.'
+            });
+        } catch (err) {
+            console.error("공유 실패:", err);
+        }
+    } else {
+        // 공유 기능 미지원 시 다운로드 처리
+        const url = window.URL.createObjectURL(data);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `barcodes.xlsx`;
+        a.click();
+    }
+}

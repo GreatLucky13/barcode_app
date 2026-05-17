@@ -1,50 +1,177 @@
-let scannedData = []; // 스캔된 바코드 저장 배열
-
-// 1. 스캔 성공 시 콜백
-function onScanSuccess(decodedText, decodedResult) {
-    if (!scannedData.includes(decodedText)) {
-        scannedData.push({ 
-            번호: scannedData.length + 1, 
-            바코드: decodedText, 
-            시간: new Date().toLocaleString() 
-        });
-        updateTable();
-        alert("스캔 완료: " + decodedText);
-    }
-}
-
-// 2. 엑셀 변환 및 공유
-async function exportAndShare() {
-    if (scannedData.length === 0) return alert("스캔된 데이터가 없습니다.");
-
-    // 엑셀 파일 생성
-    const worksheet = XLSX.utils.json_to_sheet(scannedData);
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, "Barcodes");
-    
-    // 바이너리 데이터로 변환
-    const excelBuffer = XLSX.write(workbook, { bookType: 'xlsx', type: 'array' });
-    const data = new Blob([excelBuffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-    
-    const file = new File([data], `barcode_list_${new Date().getTime()}.xlsx`, { type: data.type });
-
-    // Web Share API를 이용한 공유 (모바일에서 작동)
-    if (navigator.share) {
-        try {
-            await navigator.share({
-                files: [file],
-                title: '바코드 스캔 목록',
-                text: '스캔한 바코드 엑셀 파일입니다.'
-            });
-        } catch (err) {
-            console.error("공유 실패:", err);
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>웹 바코드 스캐너</title>
+    <!-- 라이브러리 로드 -->
+    <script src="https://unpkg.com/html5-qrcode"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        #reader { width: 100%; border: none !important; }
+        #reader__dashboard_section_csr button {
+            background-color: #3b82f6 !important;
+            color: white !important;
+            padding: 8px 16px !important;
+            border-radius: 8px !important;
+            margin-top: 10px !important;
         }
-    } else {
-        // 공유 기능 미지원 시 다운로드 처리
-        const url = window.URL.createObjectURL(data);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `barcodes.xlsx`;
-        a.click();
-    }
-}
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen">
+
+    <div class="max-w-md mx-auto bg-white min-h-screen shadow-lg flex flex-col">
+        <!-- 헤더 -->
+        <header class="p-4 bg-blue-600 text-white text-center font-bold text-xl shadow-md">
+            바코드 엑셀 스캐너
+        </header>
+
+        <!-- 스캐너 영역 -->
+        <div class="p-4">
+            <div id="reader" class="rounded-lg overflow-hidden border-2 border-blue-200"></div>
+        </div>
+
+        <!-- 컨트롤 및 통계 -->
+        <div class="px-4 py-2 flex justify-between items-center bg-gray-50 border-y">
+            <span class="text-gray-600 font-medium">스캔된 항목: <span id="count" class="text-blue-600 font-bold">0</span>개</span>
+            <div class="space-x-2">
+                <button onclick="clearList()" class="text-sm text-red-500 border border-red-500 px-2 py-1 rounded">초기화</button>
+            </div>
+        </div>
+
+        <!-- 목록 영역 -->
+        <div class="flex-1 overflow-y-auto p-4">
+            <ul id="barcode-list" class="space-y-2">
+                <!-- 스캔 데이터가 여기에 추가됨 -->
+            </ul>
+        </div>
+
+        <!-- 하단 버튼 -->
+        <div class="p-4 bg-white border-t sticky bottom-0">
+            <button onclick="exportAndShare()" class="w-full bg-green-500 hover:bg-green-600 text-white font-bold py-4 rounded-xl shadow-lg flex justify-center items-center gap-2 transition-all">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="8 16a2 2 0 012-2h4a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                </svg>
+                엑셀 파일로 공유하기
+            </button>
+        </div>
+    </div>
+
+    <script>
+        let scannedData = [];
+        const html5QrcodeScanner = new Html5QrcodeScanner("reader", { 
+            fps: 10, 
+            qrbox: {width: 250, height: 150},
+            aspectRatio: 1.0
+        });
+
+        // 스캔 성공 시
+        function onScanSuccess(decodedText, decodedResult) {
+            // 중복 스캔 방지 (선택 사항)
+            if (scannedData.find(item => item.바코드 === decodedText)) {
+                return; 
+            }
+
+            const now = new Date();
+            const timeStr = `${now.getHours()}:${now.getMinutes()}:${now.getSeconds()}`;
+            
+            const newItem = {
+                번호: scannedData.length + 1,
+                바코드: decodedText,
+                스캔시간: timeStr
+            };
+
+            scannedData.unshift(newItem); // 최신 데이터를 위로
+            updateUI();
+            
+            // 진동 피드백 (모바일 전용)
+            if (navigator.vibrate) navigator.vibrate(100);
+        }
+
+        function updateUI() {
+            document.getElementById('count').innerText = scannedData.length;
+            const listEl = document.getElementById('barcode-list');
+            listEl.innerHTML = scannedData.map(item => `
+                <li class="bg-white p-3 rounded shadow-sm border-l-4 border-blue-500 flex justify-between items-center animate-fade-in-down">
+                    <div>
+                        <div class="text-sm font-bold text-gray-800">${item.바코드}</div>
+                        <div class="text-xs text-gray-400">${item.스캔시간}</div>
+                    </div>
+                    <button onclick="removeItem(${item.번호})" class="text-red-300 hover:text-red-500 text-xl">&times;</button>
+                </li>
+            `).join('');
+        }
+
+        function removeItem(num) {
+            scannedData = scannedData.filter(item => item.번호 !== num);
+            updateUI();
+        }
+
+        function clearList() {
+            if(confirm("모든 데이터를 삭제할까요?")) {
+                scannedData = [];
+                updateUI();
+            }
+        }
+
+        // 엑셀 변환 및 공유 함수
+        async function exportAndShare() {
+            if (scannedData.length === 0) {
+                alert("스캔된 데이터가 없습니다.");
+                return;
+            }
+
+            // 1. 엑셀 데이터 생성
+            const worksheet = XLSX.utils.json_to_sheet(scannedData);
+            const workbook = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(workbook, worksheet, "스캔목록");
+            
+            // 2. 엑셀 파일을 바이너리로 변환
+            const excelBuffer = XLSX.write(workbook, { bookType: 'xlsx', type: 'array' });
+            const data = new Blob([excelBuffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+            
+            const fileName = `barcode_list_${new Date().getTime()}.xlsx`;
+            const file = new File([data], fileName, { type: data.type });
+
+            // 3. Web Share API 사용 (모바일 공유창 호출)
+            if (navigator.canShare && navigator.canShare({ files: [file] })) {
+                try {
+                    await navigator.share({
+                        files: [file],
+                        title: '바코드 스캔 목록',
+                        text: '스캔한 바코드 목록 엑셀 파일입니다.'
+                    });
+                } catch (err) {
+                    if (err.name !== 'AbortError') {
+                        console.error("공유 실패:", err);
+                        downloadFallback(data, fileName);
+                    }
+                }
+            } else {
+                // 공유 기능을 지원하지 않는 브라우저(PC 등)는 바로 다운로드
+                downloadFallback(data, fileName);
+            }
+        }
+
+        function downloadFallback(data, fileName) {
+            const url = window.URL.createObjectURL(data);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = fileName;
+            a.click();
+            alert("공유 기능을 지원하지 않는 환경이라 파일을 다운로드합니다.");
+        }
+
+        html5QrcodeScanner.render(onScanSuccess);
+    </script>
+
+    <style>
+        @keyframes fade-in-down {
+            0% { opacity: 0; transform: translateY(-10px); }
+            100% { opacity: 1; transform: translateY(0); }
+        }
+        .animate-fade-in-down { animation: fade-in-down 0.3s ease-out; }
+    </style>
+</body>
+</html>
